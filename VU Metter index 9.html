@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic VU Meter</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .meter-container {
+            display: flex;
+            gap: 40px;
+            margin-bottom: 20px;
+        }
+        .channel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .bar-bg {
+            width: 30px;
+            height: 300px;
+            background-color: #333;
+            position: relative;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            width: 100%;
+            height: 0%;
+            background: linear-gradient(to top, #00ff00 0%, #ffff00 70%, #ff0000 100%);
+            position: absolute;
+            bottom: 0;
+            transition: height 0.05s ease;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="meter-container">
+        <div class="channel">
+            <h3>LEFT</h3>
+            <div class="bar-bg">
+                <div id="fillL" class="bar-fill"></div>
+            </div>
+        </div>
+        <div class="channel">
+            <h3>RIGHT</h3>
+            <div class="bar-bg">
+                <div id="fillR" class="bar-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <button id="startBtn">Start Microphone</button>
+
+    <script>
+        let audioCtx;
+        let analyserL;
+        let analyserR;
+        let source;
+        let splitter;
+        let dataArrayL;
+        let dataArrayR;
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            // Initialize Audio Context after user gesture
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                initMic(stream);
+                document.getElementById('startBtn').innerText = "Microphone Active";
+            } catch (err) {
+                console.error("Error accessing microphone: ", err);
+                alert("Could not access microphone. Please check permissions.");
+            }
+        });
+
+        function initMic(s) {
+            source = audioCtx.createMediaStreamSource(s);
+            
+            // Create separate analysers for Left and Right channels
+            analyserL = audioCtx.createAnalyser();
+            analyserR = audioCtx.createAnalyser();
+            analyserL.fftSize = 256;
+            analyserR.fftSize = 256;
+
+            dataArrayL = new Uint8Array(analyserL.frequencyBinCount);
+            dataArrayR = new Uint8Array(analyserR.frequencyBinCount);
+
+            // Check how many audio channels the microphone actually has
+            const activeChannels = source.channelCount;
+
+            if (activeChannels >= 2) {
+                // STEREO MODE: Split the 2 channels into Left and Right
+                splitter = audioCtx.createChannelSplitter(2);
+                source.connect(splitter);
+                splitter.connect(analyserL, 0); // Connect Channel 0 to Left
+                splitter.connect(analyserR, 1); // Connect Channel 1 to Right
+                console.log("Stereo mode active: Splitting 2 channels.");
+            } else {
+                // MONO MODE: Force the single mic channel into BOTH analysers
+                source.connect(analyserL);
+                source.connect(analyserR);
+                console.log("Mono mode active: Mirroring 1 channel to both sides.");
+            }
+
+            drawMeters();
+        }
+
+        function drawMeters() {
+            requestAnimationFrame(drawMeters);
+
+            if (!analyserL || !analyserR) return;
+
+            // Get volume data
+            analyserL.getByteFrequencyData(dataArrayL);
+            analyserR.getByteFrequencyData(dataArrayR);
+
+            // Calculate average volume for Left
+            let totalL = 0;
+            for (let i = 0; i < dataArrayL.length; i++) {
+                totalL += dataArrayL[i];
+            }
+            let averageL = totalL / dataArrayL.length;
+
+            // Calculate average volume for Right
+            let totalR = 0;
+            for (let i = 0; i < dataArrayR.length; i++) {
+                totalR += dataArrayR[i];
+            }
+            let averageR = totalR / dataArrayR.length;
+
+            // Convert to percentage (max value for frequency data is 255)
+            // Added a slight multiplier (* 1.5) to boost low phone microphone signals
+            let heightL = Math.min((averageL / 255) * 100 * 1.5, 100);
+            let heightR = Math.min((averageR / 255) * 100 * 1.5, 100);
+
+            // Update the HTML display
+            document.getElementById('fillL').style.height = heightL + '%';
+            document.getElementById('fillR').style.height = heightR + '%';
+        }
+    </script>
+</body>
+</html>
